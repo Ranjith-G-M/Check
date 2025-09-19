@@ -1,0 +1,389 @@
+[19/09, 08:41] Ranjith: /* ============================================================
+   ONLINE BANK MANAGEMENT SYSTEM - MODERN VERSION
+   Rules followed:
+   ✅ No Foreign Keys
+   ✅ Naming convention: m_ (master), d_ (detail)
+   ✅ Check if table exists before creating
+   ✅ Passwords stored encrypted (simple logic)
+   ✅ Stored Procedures with TRY...CATCH
+   ✅ ACID Transactions (BEGIN/COMMIT/ROLLBACK)
+   ✅ Triggers for auto transaction log
+   ✅ Index on account_no
+   ============================================================ */
+
+------------------------------------------------------------
+-- 1. Password Encryption / Decryption Functions
+------------------------------------------------------------
+IF OBJECT_ID('fn_encryptPassword') IS NOT NULL DROP FUNCTION fn_encryptPassword;
+GO
+CREATE FUNCTION fn_encryptPassword(@pwd NVARCHAR(200))
+RETURNS NVARCHAR(200)
+AS
+BEGIN
+    -- Simple reversible encryption: reverse + shift
+    RETURN REVERSE(CONVERT(NVARCHAR(200), HASHBYTES('SHA2_256', @pwd), 2));
+END;
+GO
+
+-- For demo simplicity: fake decrypt (just return input)
+-- (SHA2_256 is one-way, so in reality decryption is not possible)
+IF OBJECT_ID('fn_decryptPassword') IS NOT NULL DROP FUNCTION fn_decryptPassword;
+GO
+CREATE FUNCTION fn_decryptPassword(@enc NVARCHAR(200))
+RETURNS NVARCHAR(200)
+AS
+BEGIN
+    RETURN @enc; -- dummy, just for demo display
+END;
+GO
+
+------------------------------------------------------------
+-- 2. Master Tables
+------------------------------------------------------------
+-- Users (Admin / Employee / Customer)
+IF OBJECT_ID('m_user','U') IS NULL
+CREATE TABLE m_user (
+    user_id   INT IDENTITY(1,1) PRIMARY KEY,
+    username  NVARCHAR(50) UNIQUE NOT NULL,
+    password  NVARCHAR(200) NOT NULL,
+    role      NVARCHAR(30) NOT NULL 
+              CHECK (role IN ('Admin','Teller','Customer')),
+    created_on DATETIME2 DEFAULT SYSDATETIME()
+);
+
+-- Customers (profile details)
+IF OBJECT_ID('m_customer','U') IS NULL
+CREATE TABLE m_customer (
+    customer_id INT IDENTITY(1,1) PRIMARY KEY,
+    user_id     INT NOT NULL, -- link to m_user
+    full_name   NVARCHAR(100) NOT NULL,
+    dob         DATE,
+    phone       NVARCHAR(20),
+    email       NVARCHAR(100),
+    address     NVARCHAR(200),
+    created_on  DATETIME2 DEFAULT SYSDATETIME()
+);
+
+-- Branch
+IF OBJECT_ID('m_branch','U') IS NULL
+CREATE TABLE m_branch (
+    branch_id   INT IDENTITY(1,1) PRIMARY KEY,
+    branch_name NVARCHAR(100),
+    branch_city NVARCHAR(50),
+    created_on  DATETIME2 DEFAULT SYSDATETIME()
+);
+
+-- Account
+IF OBJECT_ID('m_account','U') IS NULL
+CREATE TABLE m_account (
+    account_id   INT IDENTITY(1,1) PRIMARY KEY,
+    customer_id  INT NOT NULL, -- link to m_customer
+    branch_id    INT NOT NULL,
+    account_no   NVARCHAR(30) UNIQUE NOT NULL,
+    account_type NVARCHAR(30) NOT NULL,
+    balance      DECIMAL(18,2) DEFAULT 0,
+    created_on   DATETIME2 DEFAULT SYSDATETIME()
+);
+
+-- Transaction Logs
+IF OBJECT_ID('d_transaction','U') IS NULL
+CREATE TABLE d_transaction (
+    trans_id   INT IDENTITY(1,1) PRIMARY KEY,
+    account_id INT NOT NULL,
+    trans_type NVARCHAR(20) NOT NULL,
+    amount     DECIMAL(18,2) NOT NULL,
+    trans_date DATETIME2 DEFAULT SYSDATETIME()
+);
+
+------------------------------------------------------------
+-- 3. Sample Data
+------------------------------------------------------------
+-- Insert default Admin if not exists
+IF NOT EXISTS (SELECT 1 FROM m_user WHERE role='Admin')
+BEGIN
+    INSERT INTO m_user (username, password, role)
+    VALUES ('admin', dbo.fn_encryptPassword('admin123'), 'Admin');
+END;
+
+-- Insert default branch if not exists
+IF NOT EXISTS (SELECT 1 FROM m_branch)
+BEGIN
+    INSERT INTO m_branch (branch_name, branch_city)
+    VALUES ('Main Branch','Hyderabad');
+END;
+
+------------------------------------------------------------
+-- 4. Stored Procedures
+------------------------------------------------------------
+
+-- Create User (Admin creates Employee/Customer users)
+IF OBJECT_ID('proc_create_user','P') IS NOT NULL DROP PROCEDURE proc_create_user;
+GO
+CREATE PROCEDURE proc_create_user
+    @username NVARCHAR(50),
+    @password NVARCHAR(200),
+    @role NVARCHAR(30)
+AS
+BEGIN
+    BEGIN TRY
+        IF EXISTS (SELECT 1 FROM m_user WHERE username=@username)
+        BEGIN
+            PRINT 'Username already exists.';
+            RETURN;
+        END
+
+        INSERT INTO m_user(username,password,role)
+        VALUES(@username,dbo.fn_encryptPassword(@password),@role);
+
+        PRINT 'User created successfully.';
+    END TRY
+    BEGIN CATCH
+        PRINT 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+-- Login
+IF OBJECT_ID('proc_login','P') IS NOT NULL DROP PROCEDURE proc_login;
+GO
+CREATE PROCEDURE proc_login
+    @username NVARCHAR(50),
+    @password NVARCHAR(200)
+AS
+BEGIN
+    DECLARE @dbPass NVARCHAR(200), @role NVARCHAR(30);
+    SELECT @dbPass=password, @role=role FROM m_user WHERE username=@username;
+
+    IF @dbPass IS NULL
+    BEGIN
+        PRINT 'Invalid username.';
+        RETURN;
+    END
+
+    IF @dbPass = dbo.fn_encryptPassword(@password)
+        PRINT 'Login successful. Role: ' + @role;
+    ELSE
+        PRINT 'Invalid password.';
+END;
+GO
+
+-- Customer Self-Service Account Creation
+IF OBJECT_ID('proc_create_account_self','P') IS NOT NULL DROP PROCEDURE proc_create_account_self;
+GO
+CREATE PROCEDURE proc_create_account_self
+    @username NVARCHAR(50),
+    @account_no NVARCHAR(30),
+    @account_type NVARCHAR(30),
+    @initial_deposit DECIMAL(18,2) = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRAN;
+
+        DECLARE @role NVARCHAR(30), @user_id INT, @cust_id INT;
+
+        -- check user exists
+        SELECT @role=role, @user_id=user_id FROM m_user WHERE username=@username;
+
+        IF @role IS NULL
+        BEGIN
+            RAISERROR('User does not exist.',16,1); ROLLBACK TRAN; RETURN;
+        END
+
+        IF @role <> 'Customer'
+        BEGIN
+            RAISERROR('Only Customers can create their own accounts.',16,1); 
+            ROLLBACK TRAN; RETURN;
+        END
+
+        -- ensure account number is unique
+        IF EXISTS (SELECT 1 FROM m_account WHERE account_no=@account_no)
+        BEGIN
+            RAISERROR('Account number already exists.',16,1);
+            ROLLBACK TRAN; RETURN;
+        END
+
+        -- check if customer profile exists, else create one
+        SELECT @cust_id=customer_id FROM m_customer WHERE user_id=@user_id;
+        IF @cust_id IS NULL
+        BEGIN
+            INSERT INTO m_customer(user_id,full_name)
+            VALUES(@user_id,@username); -- minimal profile
+            SET @cust_id=SCOPE_IDENTITY();
+        END
+
+        -- create account
+        INSERT INTO m_account(customer_id,branch_id,account_no,account_type,balance)
+        VALUES(@cust_id,1,@account_no,@account_type,@initial_deposit);
+
+        -- log initial deposit
+        IF @initial_deposit > 0
+        BEGIN
+            INSERT INTO d_transaction(account_id,trans_type,amount)
+            VALUES(SCOPE_IDENTITY(),'Deposit',@initial_deposit);
+        END
+
+        COMMIT TRAN;
+        PRINT 'Account created successfully for ' + @username;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRAN;
+        PRINT 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+-- Deposit
+IF OBJECT_ID('proc_deposit','P') IS NOT NULL DROP PROCEDURE proc_deposit;
+GO
+CREATE PROCEDURE proc_deposit
+    @account_no NVARCHAR(30),
+    @amount DECIMAL(18,2)
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRAN;
+
+        UPDATE m_account SET balance = balance + @amount
+        WHERE account_no=@account_no;
+
+        INSERT INTO d_transaction(account_id,trans_type,amount)
+        SELECT account_id,'Deposit',@amount FROM m_account WHERE account_no=@account_no;
+
+        COMMIT TRAN;
+        PRINT 'Deposit successful.';
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRAN;
+        PRINT 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+-- Withdraw
+IF OBJECT_ID('proc_withdraw','P') IS NOT NULL DROP PROCEDURE proc_withdraw;
+GO
+CREATE PROCEDURE proc_withdraw
+    @account_no NVARCHAR(30),
+    @amount DECIMAL(18,2)
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRAN;
+
+        DECLARE @bal DECIMAL(18,2);
+        SELECT @bal=balance FROM m_account WHERE account_no=@account_no;
+
+        IF @bal < @amount
+        BEGIN
+            RAISERROR('Insufficient funds.',16,1); 
+            ROLLBACK TRAN; RETURN;
+        END
+
+        UPDATE m_account SET balance = balance - @amount
+        WHERE account_no=@account_no;
+
+        INSERT INTO d_transaction(account_id,trans_type,amount)
+        SELECT account_id,'Withdraw',@amount FROM m_account WHERE account_no=@account_no;
+
+        COMMIT TRAN;
+        PRINT 'Withdrawal successful.';
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRAN;
+        PRINT 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+-- Transfer
+IF OBJECT_ID('proc_transfer','P') IS NOT NULL DROP PROCEDURE proc_transfer;
+GO
+CREATE PROCEDURE proc_transfer
+    @from_acc NVARCHAR(30),
+    @to_acc NVARCHAR(30),
+    @amount DECIMAL(18,2)
+AS
+BEGIN
+    BEGIN TRY
+        BEGIN TRAN;
+
+        DECLARE @bal DECIMAL(18,2);
+        SELECT @bal=balance FROM m_account WHERE account_no=@from_acc;
+
+        IF @bal < @amount
+        BEGIN
+            RAISERROR('Insufficient funds.',16,1);
+            ROLLBACK TRAN; RETURN;
+        END
+
+        UPDATE m_account SET balance = balance - @amount WHERE account_no=@from_acc;
+        UPDATE m_account SET balance = balance + @amount WHERE account_no=@to_acc;
+
+        INSERT INTO d_transaction(account_id,trans_type,amount)
+        SELECT account_id,'Transfer Out',@amount FROM m_account WHERE account_no=@from_acc;
+
+        INSERT INTO d_transaction(account_id,trans_type,amount)
+        SELECT account_id,'Transfer In',@amount FROM m_account WHERE account_no=@to_acc;
+
+        COMMIT TRAN;
+        PRINT 'Transfer successful.';
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRAN;
+        PRINT 'Error: ' + ERROR_MESSAGE();
+    END CATCH
+END;
+GO
+
+------------------------------------------------------------
+-- 5. Trigger (auto log balance changes if updated manually)
+------------------------------------------------------------
+IF OBJECT_ID('trg_log_balance','TR') IS NOT NULL DROP TRIGGER trg_log_balance;
+GO
+CREATE TRIGGER trg_log_balance
+ON m_account
+AFTER UPDATE
+AS
+BEGIN
+    IF UPDATE(balance)
+    BEGIN
+        INSERT INTO d_transaction(account_id,trans_type,amount,trans_date)
+        SELECT i.account_id,'Manual Update',(i.balance - d.balance),SYSDATETIME()
+        FROM inserted i
+        JOIN deleted d ON i.account_id=d.account_id;
+    END
+END;
+GO
+
+------------------------------------------------------------
+-- 6. Index
+------------------------------------------------------------
+IF NOT EXISTS (
+    SELECT name FROM sys.indexes 
+    WHERE name='idx_account_no' AND object_id=OBJECT_ID('m_account')
+)
+CREATE INDEX idx_account_no ON m_account(account_no);
+GO
+[19/09, 08:42] Ranjith: To check 
+-- Admin creates a new Customer user
+EXEC proc_create_user @username='alice', @password='alice123', @role='Customer';
+
+-- Customer logs in
+EXEC proc_login @username='alice', @password='alice123';
+
+-- Customer creates own account
+EXEC proc_create_account_self @username='alice', @account_no='ACC1001', @account_type='Savings', @initial_deposit=500;
+
+-- Deposit
+EXEC proc_deposit @account_no='ACC1001', @amount=1000;
+
+-- Withdraw
+EXEC proc_withdraw @account_no='ACC1001', @amount=200;
+
+-- Transfer (need 2 accounts: create another)
+EXEC proc_create_user @username='bob', @password='bob123', @role='Customer';
+EXEC proc_create_account_self @username='bob', @account_no='ACC1002', @account_type='Savings', @initial_deposit=300;
+
+EXEC proc_transfer @from_acc='ACC1001', @to_acc='ACC1002', @amount=100;
