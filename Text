@@ -1,389 +1,567 @@
-[19/09, 08:41] Ranjith: /* ============================================================
-   ONLINE BANK MANAGEMENT SYSTEM - MODERN VERSION
-   Rules followed:
-   ✅ No Foreign Keys
-   ✅ Naming convention: m_ (master), d_ (detail)
-   ✅ Check if table exists before creating
-   ✅ Passwords stored encrypted (simple logic)
-   ✅ Stored Procedures with TRY...CATCH
-   ✅ ACID Transactions (BEGIN/COMMIT/ROLLBACK)
-   ✅ Triggers for auto transaction log
-   ✅ Index on account_no
-   ============================================================ */
+package com.library.model;
 
-------------------------------------------------------------
--- 1. Password Encryption / Decryption Functions
-------------------------------------------------------------
-IF OBJECT_ID('fn_encryptPassword') IS NOT NULL DROP FUNCTION fn_encryptPassword;
-GO
-CREATE FUNCTION fn_encryptPassword(@pwd NVARCHAR(200))
-RETURNS NVARCHAR(200)
-AS
-BEGIN
-    -- Simple reversible encryption: reverse + shift
-    RETURN REVERSE(CONVERT(NVARCHAR(200), HASHBYTES('SHA2_256', @pwd), 2));
-END;
-GO
+//	id, title, author, price, available count
+//pojo
+public class Book {
+	private short id;
+	private String title;
+	private String author;
+	private float price;
+	private short availableCount;
+	
+	public short getId() {
+		return id;
+	}
+	public void setId(short id) {
+		this.id = id;
+	}
+	public String getTitle() {
+		return title;
+	}
+	public void setTitle(String title) {
+		this.title = title;
+	}
+	public String getAuthor() {
+		return author;
+	}
+	public void setAuthor(String author) {
+		this.author = author;
+	}
+	public double getPrice() {
+		return price;
+	}
+	public void setPrice(short price) {
+		this.price = price;
+	}
+	public short getAvailableCount() {
+		return availableCount;
+	}
+	public void setAvailableCount(short availableCount) {
+		this.availableCount = availableCount;
+	}
+	public void increaseCount() {
+		availableCount++;
+	}
+	public void DecreaseCount() {
+		if(availableCount>0) {
+			availableCount--;
+		}else {
+			System.out.print("As of know there is no books available");
+		}
+	}
+	public Book(short id,String title,String author,float price,short availableCount) {	
+		this.id=id;
+		this.title=title;
+		this.author=author;
+		this.price=price;
+		this.availableCount=availableCount;	
+	}
+	
+	@Override
+	public String toString() {
+		return "Book [id=" + id + ", title=" + title + ", author=" + author + ", price=" + price + ", availableCount="
+				+ availableCount + "]";
+	}
+	
+	
 
--- For demo simplicity: fake decrypt (just return input)
--- (SHA2_256 is one-way, so in reality decryption is not possible)
-IF OBJECT_ID('fn_decryptPassword') IS NOT NULL DROP FUNCTION fn_decryptPassword;
-GO
-CREATE FUNCTION fn_decryptPassword(@enc NVARCHAR(200))
-RETURNS NVARCHAR(200)
-AS
-BEGIN
-    RETURN @enc; -- dummy, just for demo display
-END;
-GO
+}
 
-------------------------------------------------------------
--- 2. Master Tables
-------------------------------------------------------------
--- Users (Admin / Employee / Customer)
-IF OBJECT_ID('m_user','U') IS NULL
-CREATE TABLE m_user (
-    user_id   INT IDENTITY(1,1) PRIMARY KEY,
-    username  NVARCHAR(50) UNIQUE NOT NULL,
-    password  NVARCHAR(200) NOT NULL,
-    role      NVARCHAR(30) NOT NULL 
-              CHECK (role IN ('Admin','Teller','Customer')),
-    created_on DATETIME2 DEFAULT SYSDATETIME()
-);
+package com.library.member;
 
--- Customers (profile details)
-IF OBJECT_ID('m_customer','U') IS NULL
-CREATE TABLE m_customer (
-    customer_id INT IDENTITY(1,1) PRIMARY KEY,
-    user_id     INT NOT NULL, -- link to m_user
-    full_name   NVARCHAR(100) NOT NULL,
-    dob         DATE,
-    phone       NVARCHAR(20),
-    email       NVARCHAR(100),
-    address     NVARCHAR(200),
-    created_on  DATETIME2 DEFAULT SYSDATETIME()
-);
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import com.library.borrow.Borrow;
+import com.library.model.Book;
 
--- Branch
-IF OBJECT_ID('m_branch','U') IS NULL
-CREATE TABLE m_branch (
-    branch_id   INT IDENTITY(1,1) PRIMARY KEY,
-    branch_name NVARCHAR(100),
-    branch_city NVARCHAR(50),
-    created_on  DATETIME2 DEFAULT SYSDATETIME()
-);
+public abstract class Role {
+	private int roleId;
+	private String name;
+	
+	private List<Borrow> takenBooks;
 
--- Account
-IF OBJECT_ID('m_account','U') IS NULL
-CREATE TABLE m_account (
-    account_id   INT IDENTITY(1,1) PRIMARY KEY,
-    customer_id  INT NOT NULL, -- link to m_customer
-    branch_id    INT NOT NULL,
-    account_no   NVARCHAR(30) UNIQUE NOT NULL,
-    account_type NVARCHAR(30) NOT NULL,
-    balance      DECIMAL(18,2) DEFAULT 0,
-    created_on   DATETIME2 DEFAULT SYSDATETIME()
-);
+	public Role(int roleId, String name) {
+		this.roleId = roleId;
+		this.name = name;
+		this.takenBooks = new ArrayList<>();
+	}
+	
+	public String getName() {
+		return name;
+	}
+	
+	public void borrowBook(Book book) {
+		
+		try {
+			System.out.println("in role class");
+		if(takenBooks.size()>=getMaxBooks()) {
+			System.out.println("sorry "+name +"  you have reached maximum borrow limit");
+		return;		
+		}
+		if(book.getAvailableCount()<=0) {
+			System.out.println("Book not available");
+			return;
+		}
+		takenBooks.add(new Borrow(book));
+		
+		System.out.println(takenBooks);
+		
+		book.DecreaseCount();
+		System.out.println(name+"borrowed "+book.getTitle());
+		
+		}catch(Exception e) {
+//			e.printStackTrace();
+			System.out.println("in side the borrowbook in role class");
+		}
+	}
+	
+	public void returnBook(Book book) {
+		Borrow record = null;
+		for(Borrow b:takenBooks) {			
+			Book book2 = b.getBook();
+			short id = (short)book2.getId();
+			
+			if(id==book.getId()) {
+				record =b;
+				break;
+			}
+		}
+		
+		if(record == null) {
+			System.out.println(name +" has not borrowed this book");
+			return;
+		}
+		
+		takenBooks.remove(record);
+		book.increaseCount();
+		
+		Long diff =ChronoUnit.DAYS.between(record.getBorrowDate(), LocalDate.now());
+		
+		
+		if(diff >5) {
+			long fine =(diff-5)*getFinePerDay();
+			System.out.println("book returning late fine is "+fine);
+			
+		}else {
+			System.out.println("Book returning on time no fine");
+		}
+	}
+		
+	
+	public abstract int getMaxBooks();
+	public abstract int getFinePerDay();
+}
 
--- Transaction Logs
-IF OBJECT_ID('d_transaction','U') IS NULL
-CREATE TABLE d_transaction (
-    trans_id   INT IDENTITY(1,1) PRIMARY KEY,
-    account_id INT NOT NULL,
-    trans_type NVARCHAR(20) NOT NULL,
-    amount     DECIMAL(18,2) NOT NULL,
-    trans_date DATETIME2 DEFAULT SYSDATETIME()
-);
 
-------------------------------------------------------------
--- 3. Sample Data
-------------------------------------------------------------
--- Insert default Admin if not exists
-IF NOT EXISTS (SELECT 1 FROM m_user WHERE role='Admin')
-BEGIN
-    INSERT INTO m_user (username, password, role)
-    VALUES ('admin', dbo.fn_encryptPassword('admin123'), 'Admin');
-END;
 
--- Insert default branch if not exists
-IF NOT EXISTS (SELECT 1 FROM m_branch)
-BEGIN
-    INSERT INTO m_branch (branch_name, branch_city)
-    VALUES ('Main Branch','Hyderabad');
-END;
+package com.library.inheritedClasses;
 
-------------------------------------------------------------
--- 4. Stored Procedures
-------------------------------------------------------------
+import com.library.member.Role;
 
--- Create User (Admin creates Employee/Customer users)
-IF OBJECT_ID('proc_create_user','P') IS NOT NULL DROP PROCEDURE proc_create_user;
-GO
-CREATE PROCEDURE proc_create_user
-    @username NVARCHAR(50),
-    @password NVARCHAR(200),
-    @role NVARCHAR(30)
-AS
-BEGIN
-    BEGIN TRY
-        IF EXISTS (SELECT 1 FROM m_user WHERE username=@username)
-        BEGIN
-            PRINT 'Username already exists.';
-            RETURN;
-        END
+public class Student extends Role{
+	
+	public Student(int roleId,String name) {
+		super(roleId,name);
+	}
 
-        INSERT INTO m_user(username,password,role)
-        VALUES(@username,dbo.fn_encryptPassword(@password),@role);
+	@Override
+	public int getMaxBooks() {
+		return 5;
+	}
 
-        PRINT 'User created successfully.';
-    END TRY
-    BEGIN CATCH
-        PRINT 'Error: ' + ERROR_MESSAGE();
-    END CATCH
-END;
-GO
+	@Override
+	public int getFinePerDay() {
+		return 15;
+	}
+	
+	
 
--- Login
-IF OBJECT_ID('proc_login','P') IS NOT NULL DROP PROCEDURE proc_login;
-GO
-CREATE PROCEDURE proc_login
-    @username NVARCHAR(50),
-    @password NVARCHAR(200)
-AS
-BEGIN
-    DECLARE @dbPass NVARCHAR(200), @role NVARCHAR(30);
-    SELECT @dbPass=password, @role=role FROM m_user WHERE username=@username;
+}
 
-    IF @dbPass IS NULL
-    BEGIN
-        PRINT 'Invalid username.';
-        RETURN;
-    END
+package com.library.inheritedClasses;
 
-    IF @dbPass = dbo.fn_encryptPassword(@password)
-        PRINT 'Login successful. Role: ' + @role;
-    ELSE
-        PRINT 'Invalid password.';
-END;
-GO
+import com.library.member.Role;
 
--- Customer Self-Service Account Creation
-IF OBJECT_ID('proc_create_account_self','P') IS NOT NULL DROP PROCEDURE proc_create_account_self;
-GO
-CREATE PROCEDURE proc_create_account_self
-    @username NVARCHAR(50),
-    @account_no NVARCHAR(30),
-    @account_type NVARCHAR(30),
-    @initial_deposit DECIMAL(18,2) = 0
-AS
-BEGIN
-    SET NOCOUNT ON;
-    BEGIN TRY
-        BEGIN TRAN;
+public class Faculty extends Role{
+	public Faculty(int roleId ,String name) {
+		
+		super(roleId,name);
+	}
 
-        DECLARE @role NVARCHAR(30), @user_id INT, @cust_id INT;
+	@Override
+	public int getMaxBooks() {
+		return 10;
+	}
 
-        -- check user exists
-        SELECT @role=role, @user_id=user_id FROM m_user WHERE username=@username;
+	@Override
+	public int getFinePerDay() {
+		return 10;
+	}
 
-        IF @role IS NULL
-        BEGIN
-            RAISERROR('User does not exist.',16,1); ROLLBACK TRAN; RETURN;
-        END
+}
 
-        IF @role <> 'Customer'
-        BEGIN
-            RAISERROR('Only Customers can create their own accounts.',16,1); 
-            ROLLBACK TRAN; RETURN;
-        END
 
-        -- ensure account number is unique
-        IF EXISTS (SELECT 1 FROM m_account WHERE account_no=@account_no)
-        BEGIN
-            RAISERROR('Account number already exists.',16,1);
-            ROLLBACK TRAN; RETURN;
-        END
+package com.library.borrow;
 
-        -- check if customer profile exists, else create one
-        SELECT @cust_id=customer_id FROM m_customer WHERE user_id=@user_id;
-        IF @cust_id IS NULL
-        BEGIN
-            INSERT INTO m_customer(user_id,full_name)
-            VALUES(@user_id,@username); -- minimal profile
-            SET @cust_id=SCOPE_IDENTITY();
-        END
+import java.time.LocalDate;
+import java.util.Date;
 
-        -- create account
-        INSERT INTO m_account(customer_id,branch_id,account_no,account_type,balance)
-        VALUES(@cust_id,1,@account_no,@account_type,@initial_deposit);
+import com.library.model.Book;
 
-        -- log initial deposit
-        IF @initial_deposit > 0
-        BEGIN
-            INSERT INTO d_transaction(account_id,trans_type,amount)
-            VALUES(SCOPE_IDENTITY(),'Deposit',@initial_deposit);
-        END
+public class Borrow {
+	
+	private Book book;
+	private LocalDate borrowDate;
+	
+	public Borrow(Book book) {
+		this.book=book;
+	}
+	
+	
+	public void setBook(Book book) {
+		this.book=book;
+	}
+	public void setBorrowDate(LocalDate borrowDate) {
+		this.borrowDate=borrowDate;
+	}
+	public Book getBook() {
+		return book;
+	}
+	public LocalDate getBorrowDate() {
+		return borrowDate;
+	}
 
-        COMMIT TRAN;
-        PRINT 'Account created successfully for ' + @username;
-    END TRY
-    BEGIN CATCH
-        ROLLBACK TRAN;
-        PRINT 'Error: ' + ERROR_MESSAGE();
-    END CATCH
-END;
-GO
+}
 
--- Deposit
-IF OBJECT_ID('proc_deposit','P') IS NOT NULL DROP PROCEDURE proc_deposit;
-GO
-CREATE PROCEDURE proc_deposit
-    @account_no NVARCHAR(30),
-    @amount DECIMAL(18,2)
-AS
-BEGIN
-    BEGIN TRY
-        BEGIN TRAN;
 
-        UPDATE m_account SET balance = balance + @amount
-        WHERE account_no=@account_no;
 
-        INSERT INTO d_transaction(account_id,trans_type,amount)
-        SELECT account_id,'Deposit',@amount FROM m_account WHERE account_no=@account_no;
 
-        COMMIT TRAN;
-        PRINT 'Deposit successful.';
-    END TRY
-    BEGIN CATCH
-        ROLLBACK TRAN;
-        PRINT 'Error: ' + ERROR_MESSAGE();
-    END CATCH
-END;
-GO
+package com.library.library;
 
--- Withdraw
-IF OBJECT_ID('proc_withdraw','P') IS NOT NULL DROP PROCEDURE proc_withdraw;
-GO
-CREATE PROCEDURE proc_withdraw
-    @account_no NVARCHAR(30),
-    @amount DECIMAL(18,2)
-AS
-BEGIN
-    BEGIN TRY
-        BEGIN TRAN;
+import java.util.ArrayList;
+import java.util.List;
 
-        DECLARE @bal DECIMAL(18,2);
-        SELECT @bal=balance FROM m_account WHERE account_no=@account_no;
+import com.library.model.Book;
 
-        IF @bal < @amount
-        BEGIN
-            RAISERROR('Insufficient funds.',16,1); 
-            ROLLBACK TRAN; RETURN;
-        END
+public class Library {
+	
+	private List<Book> book;
+	
+	public Library() {
+		
+		book= new ArrayList<>();
+	}
+	
+	public void addBook(Book book) {
+		this.book.add(book);
+	}
+	
+	public boolean chekcId(int id) {
+		
+		for(Book b:book) {
+			if(b.getId()==(short)id) {
+				return true;
+			}
+		}
+			
+		return false;
+	}
+	
+	public Book findBookByID(Short id) {
+		
+//		return book.stream()
+//					.filter(b->b.getId() ==id)
+//					.findFirst()
+//					.orElse(null);
+		
+		for(Book b:book) {
+			if(b.getId()==id) {
+				return b;
+			}
+		}
+		return null;
+	}
+	
+	public void showBooks() {
+//		for(Book b : book) {
+//			System.out.println(b);
+//		}or
+//		book.stream()
+//			.map(Book::toString)or
+		
+		book.forEach(System.out::println);
+	}
 
-        UPDATE m_account SET balance = balance - @amount
-        WHERE account_no=@account_no;
+}
 
-        INSERT INTO d_transaction(account_id,trans_type,amount)
-        SELECT account_id,'Withdraw',@amount FROM m_account WHERE account_no=@account_no;
 
-        COMMIT TRAN;
-        PRINT 'Withdrawal successful.';
-    END TRY
-    BEGIN CATCH
-        ROLLBACK TRAN;
-        PRINT 'Error: ' + ERROR_MESSAGE();
-    END CATCH
-END;
-GO
+package com.library.mainClass;
 
--- Transfer
-IF OBJECT_ID('proc_transfer','P') IS NOT NULL DROP PROCEDURE proc_transfer;
-GO
-CREATE PROCEDURE proc_transfer
-    @from_acc NVARCHAR(30),
-    @to_acc NVARCHAR(30),
-    @amount DECIMAL(18,2)
-AS
-BEGIN
-    BEGIN TRY
-        BEGIN TRAN;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
 
-        DECLARE @bal DECIMAL(18,2);
-        SELECT @bal=balance FROM m_account WHERE account_no=@from_acc;
+import com.library.inheritedClasses.Faculty;
+import com.library.inheritedClasses.Student;
+import com.library.library.Library;
+import com.library.member.Role;
+import com.library.model.Book;
 
-        IF @bal < @amount
-        BEGIN
-            RAISERROR('Insufficient funds.',16,1);
-            ROLLBACK TRAN; RETURN;
-        END
+public class ExecutingClass {
+	private static Scanner scan = new Scanner(System.in);
+	static	Role student ;
+	static	Role f ;
+	static Library l = new Library();	
+	private static List<Role> members = new ArrayList<>();
 
-        UPDATE m_account SET balance = balance - @amount WHERE account_no=@from_acc;
-        UPDATE m_account SET balance = balance + @amount WHERE account_no=@to_acc;
+	public static void inBuiltStudents(Library l) {
+//		members.add(new Student(101,"ravi"));
+		student =new Student(101, "iron man");
+		
+		members.add(student);
+	}
+	public static void inBuiltFaculty(Library l) {
+		members.add(new Faculty(201,"raghu"));
+	}
 
-        INSERT INTO d_transaction(account_id,trans_type,amount)
-        SELECT account_id,'Transfer Out',@amount FROM m_account WHERE account_no=@from_acc;
+	public static void inBuiltBook(Library l) {
+		
+		l.addBook(new Book((short)1,"Atomic Habits","james",150.0f ,(short)3));
+		l.addBook(new Book((short)2,"Can't Hurt me","goggins",200.0f ,(short)5));
+		l.addBook(new Book((short)3,"deep work","ranjith",100.0f ,(short)2));
+		l.addBook(new Book((short)4,"pshcology of money","cane",350.0f ,(short)1));
+		l.addBook(new Book((short)5,"secret","jack",150.0f ,(short)3));
+		l.addBook(new Book((short)6,"distinory","rahul",50.0f ,(short)2));
+	}
+		
+	public static void faculty() {
+		boolean flag = true;
+		while(flag) {
+			System.out.println("Library Context");
+			System.out.println();
+			System.out.println("1. show books");
+			System.out.println("2. book borrow");
+			System.out.println("3. returning book");
+			System.out.println("4. exit library");		
+		
+		System.out.println("Enter choice: ");
+		
+		int choice = scan.nextInt();
+		
+		switch(choice) {
+		case 1:
+			l.showBooks();
+			break;
+		case 2:
+			System.out.println("Enter the Book id");
+			f.borrowBook(l.findBookByID(scan.nextShort()));
+			break;
+		case 3:
+			System.out.println("Enter the  book id");
+			
+			f.returnBook(l.findBookByID(scan.nextShort()));
+			break;
+		case 4:
+			flag = false;
+			break;
+			
+		default:
+			System.out.print("Invalid Choice");
+			break;
+						
+		}
+		}
+		scan.close();
+		
+	}
+	
+	public static void students() {		
+		boolean flag = true;
+		
+		while(flag) {
+			System.out.println("_____________________Library Context___________________");
+			System.out.println();
+			System.out.println("1. show books");
+			System.out.println("2. book borrow");
+			System.out.println("3. returning book");
+			System.out.println("4. exit library\n");		
+		
+		System.out.println("[Enter choice:__ ");
+		
+		int choice = scan.nextInt();
+		
+		switch(choice) {
+		case 1:
+			l.showBooks();
+			break;
+		case 2:
+			System.out.println("Enter the Book id");
+			Short id=scan.nextShort();
+			Book bookIdFounded = l.findBookByID(id);
+			System.out.println(bookIdFounded);
+				System.out.println("ghjk");
+				student.borrowBook(bookIdFounded);
+				
+				System.out.println("fhuh");
 
-        INSERT INTO d_transaction(account_id,trans_type,amount)
-        SELECT account_id,'Transfer In',@amount FROM m_account WHERE account_no=@to_acc;
+//		student.borrowBook(l.findBookByID(scan.nextShort()));
+			break;
+		case 3:
+			System.out.println("Enter the  book id");
+			
+			student.returnBook(l.findBookByID(scan.nextShort()));
+			break;
+		case 4:
+			flag = false;
+			break;
+			
+		default:
+			System.out.print("Invalid Choice");
+			break;
+						
+		}
+		}
+		scan.close();
+		
+	}
+	
+	public static void admin() {
+		
+		boolean flag = true;
+		while(flag) {
+			System.out.println("admin menu");
+			System.out.println("1. add book");
+			System.out.println("2. view books");
+			System.out.println("3. add students");
+			System.out.println("4. add faculty");
+			System.out.println("5.back to main menu");
+			
+			
+			int choice = scan.nextInt();
+			scan.nextLine();
+			
+			switch(choice) {
+			case 1:
+				addBook();
+				break;
+			case 2:
+				l.showBooks();
+				break;
+			case 3:
+				addStudents();
+				break;
+			case 4:
+				addFaculty();
+				break;
+			case 5:
+				flag = false;
+				admin();
+				break;
+			default:
+				System.out.println("Invalid choice");
+			}	
+		}	
+		
+	}
+	
+	public static void addBook() {
+		 System.out.println("enter book id");
+		short id =scan.nextShort();
+		
+		if(l.chekcId(id)) {
+			System.out.println("This id is already present \n");
+			admin();
+		}
+		scan.nextLine();
+		System.out.println("enter title");
+		String title = scan.nextLine();
+		System.out.println("enter author");
+		String author =scan.nextLine();
+		System.out.println("enter price");
+		short price = scan.nextShort();
+		System.out.println("enter availablity");
+		
+		short availability = scan.nextShort();
+		
+		if(availability <=0) {
+			System.out.println("Please enter the valid book count \n");
+			
+			admin();
+			return;
+		}
+		
+		
+		Book newBook = new Book(id,title,author,price,availability);
+		l.addBook(newBook);
+		System.out.println("book added");
+		
+	}
+	
+	public static void addStudents() {
+		System.out.println(" enter students id:");
+		int id = scan.nextInt();
+		scan.nextLine();
+		System.out.println("enter students name");
+		String name = scan.nextLine();
+		members.add(new Student(id,name));
+		System.out.println("student added ");
+		
+	}
+	public static void addFaculty() {
+		System.out.println("enter Faculty id:");
+		int id = scan.nextInt();
+		System.out.println("enter Faculty name");
+		String name = scan.nextLine();
+		members.add(new Faculty(id,name));
+		System.out.println("faculty added ");	
+	}
+	
+	public static void main(String[] args) {
+		
+		System.out.println("----------------------------------------------------\n"
+									+ "           ::Welcome to Ranjith Library::"
+									+ "\n----------------------------------------------------");
+		
+		System.out.println("Please Specify your Role \n 1. Admin \n 2. student \n 3. faculty");
+		
+		System.out.println("Note: if you want to come back to previous menu please type 'Go Back'");
+		
+		
+		inBuiltBook(l);
+		inBuiltStudents(l);
+		inBuiltFaculty(l);
+		
+		int role = scan.nextInt();
+		
+	
+		try {
+			switch(role) {
+			
+				case 1:
+					admin();
+					break;
+				case 2:
+					students();
+					break;
+				case 3:
+					faculty();
+					break;
+				default:
+					System.out.println("Invalid Options");
+					break;
+			  }
+		}catch(Exception e) {
+			System.out.print("error occured in main method ");
+			e.printStackTrace();
+		}
 
-        COMMIT TRAN;
-        PRINT 'Transfer successful.';
-    END TRY
-    BEGIN CATCH
-        ROLLBACK TRAN;
-        PRINT 'Error: ' + ERROR_MESSAGE();
-    END CATCH
-END;
-GO
+	
+}
+}
 
-------------------------------------------------------------
--- 5. Trigger (auto log balance changes if updated manually)
-------------------------------------------------------------
-IF OBJECT_ID('trg_log_balance','TR') IS NOT NULL DROP TRIGGER trg_log_balance;
-GO
-CREATE TRIGGER trg_log_balance
-ON m_account
-AFTER UPDATE
-AS
-BEGIN
-    IF UPDATE(balance)
-    BEGIN
-        INSERT INTO d_transaction(account_id,trans_type,amount,trans_date)
-        SELECT i.account_id,'Manual Update',(i.balance - d.balance),SYSDATETIME()
-        FROM inserted i
-        JOIN deleted d ON i.account_id=d.account_id;
-    END
-END;
-GO
 
-------------------------------------------------------------
--- 6. Index
-------------------------------------------------------------
-IF NOT EXISTS (
-    SELECT name FROM sys.indexes 
-    WHERE name='idx_account_no' AND object_id=OBJECT_ID('m_account')
-)
-CREATE INDEX idx_account_no ON m_account(account_no);
-GO
-[19/09, 08:42] Ranjith: To check 
--- Admin creates a new Customer user
-EXEC proc_create_user @username='alice', @password='alice123', @role='Customer';
 
--- Customer logs in
-EXEC proc_login @username='alice', @password='alice123';
 
--- Customer creates own account
-EXEC proc_create_account_self @username='alice', @account_no='ACC1001', @account_type='Savings', @initial_deposit=500;
 
--- Deposit
-EXEC proc_deposit @account_no='ACC1001', @amount=1000;
-
--- Withdraw
-EXEC proc_withdraw @account_no='ACC1001', @amount=200;
-
--- Transfer (need 2 accounts: create another)
-EXEC proc_create_user @username='bob', @password='bob123', @role='Customer';
-EXEC proc_create_account_self @username='bob', @account_no='ACC1002', @account_type='Savings', @initial_deposit=300;
-
-EXEC proc_transfer @from_acc='ACC1001', @to_acc='ACC1002', @amount=100;
