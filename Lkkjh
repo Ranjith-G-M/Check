@@ -1,0 +1,46 @@
+// Replace getUserById method in CustomerDAOImpl.java
+
+@Override
+public Customer getUserById(int userId) throws Exception {
+    Connection con = null;
+    PreparedStatement ps = null;
+    ResultSet rs = null;
+    
+    try {
+        con = DbConnection.getConnection();
+        
+        // IMPORTANT: Added is_temp_password to SELECT query
+        String sql = "SELECT u.user_id, u.email, u.status, u.account_type, u.intial_deposit_done, " +
+                    "u.is_temp_password, a.status as account_status " +
+                    "FROM [SQLTraining].[GMR_Bank].[ms_Users] u " +
+                    "LEFT JOIN [SQLTraining].[GMR_Bank].[md_Accounts] a ON u.user_id = a.user_id " +
+                    "WHERE u.user_id = ?";
+        
+        ps = con.prepareStatement(sql);
+        ps.setInt(1, userId);
+        rs = ps.executeQuery();
+        
+        if (rs.next()) {
+            Customer u = new Customer();
+            u.setUser_id(rs.getInt("user_id"));
+            u.setEmail(rs.getString("email"));
+            u.setStatus(rs.getString("status"));
+            u.setAccount_type(rs.getString("account_type"));
+            u.setIntial_deposit_done(rs.getBoolean("intial_deposit_done"));
+            u.setIs_temp_password(rs.getBoolean("is_temp_password")); // IMPORTANT: Added this
+            
+            // Check account status
+            String accountStatus = rs.getString("account_status");
+            if (accountStatus != null && "Inactive".equalsIgnoreCase(accountStatus)) {
+                u.setStatus("INACTIVE");
+            }
+            
+            return u;
+        }
+        return null;
+    } finally {
+        if (rs != null) rs.close();
+        if (ps != null) ps.close();
+        if (con != null) con.close();
+    }
+}
