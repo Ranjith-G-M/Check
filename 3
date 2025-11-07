@@ -1,0 +1,50 @@
+// Replace getAllTransactions method in AdminDAOImpl.java
+
+@Override
+public List<Transactions> getAllTransactions() throws Exception {
+    Connection con = null;
+    PreparedStatement ps = null;
+    ResultSet rs = null;
+    List<Transactions> list = new ArrayList<Transactions>();
+    try {
+        con = DbConnection.getConnection();
+        String sql = "SELECT [transaction_id], [account_id], [type], [amount], " +
+                    "[transaction_date], [description], [balance_after_transaction] " +
+                    "FROM [SQLTraining].[GMR_Bank].[dd_Transactions] " +
+                    "ORDER BY transaction_date DESC, transaction_id DESC";
+        
+        ps = con.prepareStatement(sql);
+        rs = ps.executeQuery();
+        
+        while (rs.next()) {
+            Transactions t = new Transactions();
+            t.setTransaction_id(rs.getInt("transaction_id"));
+            t.setAccount_id(rs.getInt("account_id"));
+            t.setType(rs.getString("type"));
+            t.setAmount(rs.getDouble("amount"));
+            t.setTransaction_date(rs.getDate("transaction_date"));
+            t.setDescription(rs.getString("description"));
+            
+            // Get balance - check if NULL for old transactions
+            double balance = rs.getDouble("balance_after_transaction");
+            if (!rs.wasNull()) {
+                t.setBalance_after_transaction(balance);
+                t.setHasBalance(true);
+            } else {
+                t.setHasBalance(false);
+            }
+            
+            list.add(t);
+        }
+        
+        logger.info("Retrieved " + list.size() + " transactions");
+        return list;
+    } finally {
+        if (rs != null)
+            rs.close();
+        if (ps != null)
+            ps.close();
+        if (con != null)
+            con.close();
+    }
+}
