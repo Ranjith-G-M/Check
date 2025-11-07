@@ -1,0 +1,87 @@
+// Replace loadAllTransactionsPage function in admin.js
+
+function loadAllTransactionsPage() {
+    var html = `
+        <h3 class="text-xl font-semibold mb-2">All Transactions</h3>
+        <table id="allTransactionsTable" class="display w-full">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Account ID</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Balance After</th>
+                    <th>Date</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+        </table>
+    `;
+
+    $('#mainContent').html(html);
+
+    $('#allTransactionsTable').DataTable({
+        ajax: {
+            url: '/' + getContextPath() + '/admin/getAllTransactions',
+            dataSrc: 'data'
+        },
+        columns: [
+            { data: 'transaction_id' },
+            { data: 'account_id' },
+            { 
+                data: 'type',
+                render: function(data) {
+                    var color = data == 'CREDIT' ? 'text-green-600' : 'text-red-600';
+                    return '<span class="' + color + ' font-semibold">' + data + '</span>';
+                }
+            },
+            { 
+                data: 'amount',
+                render: function(data, type, row) {
+                    var prefix = row.type == 'CREDIT' ? '+' : '-';
+                    var color = row.type == 'CREDIT' ? 'text-green-600' : 'text-red-600';
+                    return '<span class="' + color + '">' + prefix + '₹' + parseFloat(data).toFixed(2) + '</span>';
+                }
+            },
+            { 
+                data: 'balance_after_transaction',
+                render: function(data, type, row) {
+                    if (row.hasBalance === false || data === null || data === undefined) {
+                        return '<span class="text-gray-400 text-xs italic">N/A</span>';
+                    }
+                    return '<span class="font-semibold text-blue-700">₹' + parseFloat(data).toFixed(2) + '</span>';
+                }
+            },
+            { 
+                data: 'transaction_date',
+                render: function(data) {
+                    var date = new Date(data);
+                    return date.toLocaleDateString('en-IN') + ' ' + date.toLocaleTimeString('en-IN', {hour: '2-digit', minute:'2-digit'});
+                }
+            },
+            { 
+                data: 'description',
+                render: function(data) {
+                    return data || '<span class="text-gray-400">-</span>';
+                }
+            }
+        ],
+        order: [[0, 'desc']],
+        dom: '<"top"lfB>rt<"bottom"ip><"clear">',
+        buttons: [
+            {
+                extend: 'excelHtml5',
+                text: '<i class="fa fa-file-excel-o"></i> Excel',
+                title: 'All_Transactions',
+                className: 'bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700'
+            },
+            {
+                extend: 'pdfHtml5',
+                text: '<i class="fa fa-file-pdf-o"></i> PDF',
+                title: 'All_Transactions',
+                orientation: 'landscape',
+                className: 'bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700'
+            }
+        ]
+    });
+}
