@@ -1,0 +1,309 @@
+// Replace the entire setupLoginForm() function in login.html
+
+function setupLoginForm() {
+    var Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3000,
+        timerProgressBar: true,
+    });
+
+    async function promptModal(message, placeholder = "", inputType = "text") {
+        var { value: input } = await Swal.fire({
+            title: message,
+            input: inputType,
+            inputPlaceholder: placeholder,
+            showCancelButton: true,
+            confirmButtonText: 'OK',
+            cancelButtonText: 'Cancel',
+            allowOutsideClick: false,
+            width: '350px',
+        });
+        
+        return (input == null || input == undefined) ? null : input;
+    }
+
+    $(document).on('click', '#forgotPasswordLink', function(e) {
+        e.preventDefault();
+        
+        var loginEmail = $('#email').val().trim();
+        
+        Swal.fire({
+            title: 'Enter the Email ',
+            html: '<input id="emaill" class="swal2-input" placeholder="Enter your registered email">',
+            confirmButtonText: 'Send Reset Link',
+            showCancelButton: true,
+            focusConfirm: false,
+            preConfirm: function() {
+                var email = document.getElementById('emaill').value;
+                
+                if (!email) {
+                    Swal.showValidationMessage('Email is required');
+                    return false;
+                }
+                
+                var emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailPattern.test(email)) {
+                    Swal.showValidationMessage('Please enter a valid email');
+                    return false;
+                }
+
+                if (loginEmail && email.toLowerCase() !== loginEmail.toLowerCase()) {
+                    Swal.showValidationMessage('Email does not match the login form');
+                    return false;
+                }
+                
+                return { email: email };
+            }
+        }).then(function(result) {
+            if (result.isConfirmed) {
+                var email = result.value.email;
+                
+                Swal.fire({
+                    title: 'Sending...',
+                    allowOutsideClick: false,
+                    didOpen: function() {
+                        Swal.showLoading();
+                    }
+                });
+                
+                $.post('LoginServlet', {
+                    action: 'forgotPassword',
+                    email: email
+                }, function(response) {
+                    if (response.success) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Email Sent!',
+                            text: response.message,
+                            confirmButtonText: 'OK'
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Failed',
+                            text: response.message,
+                            confirmButtonText: 'Try Again'
+                        });
+                    }
+                }, 'json').fail(function() {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Unable to process request. Please try again later.',
+                        confirmButtonText: 'OK'
+                    });
+                });
+            }
+        });
+    });
+
+    $("#loginForm").on("submit", async function (e) {
+        e.preventDefault();
+
+        try {
+            var raw = await $.ajax({
+                url: "LoginServlet",
+                type: "POST",
+                data: $(this).serialize(),
+                dataType: "text"
+            });
+
+            let res;
+            try {
+                res = JSON.parse(raw.replace(/^\uFEFF/,"").trim()); 
+            } catch(e) { 
+                Toast.fire({ icon: 'error', title: 'Invalid email or password' });
+                return;
+            }
+
+            if (!res.success) {
+                let errorMessage = "Login failed";
+                if (typeof res.message == 'string') {
+                    errorMessage = res.message;
+                }
+                
+                Toast.fire({ 
+                    icon: 'error', 
+                    title: errorMessage 
+                });
+                return;
+            }
+
+            // ===== NEW: Check for forced password change =====
+            if (res.forcedPasswordChange === true) {
+                console.log("Forced password change detected!");
+                
+                Swal.fire({
+                    title: 'Password Change Required',
+                    html: `
+                        <p class="text-sm text-gray-600 mb-4">You are using a temporary password. Please create a new password to continue.</p>
+                        <input type="password" id="newPass1" class="swal2-input" placeholder="New Password (min 6 chars)">
+                        <input type="password" id="newPass2" class="swal2-input" placeholder="Confirm New Password">
+                        <p class="text-xs text-gray-500 mt-2">Password must be at least 6 characters with uppercase, number, and special character</p>
+                    `,
+                    showCancelButton: false,
+                    allowOutsideClick: false,
+                    allowEscapeKey: false,
+                    confirmButtonText: 'Change Password',
+                    preConfirm: function() {
+                        var newPass = document.getElementById('newPass1').value;
+                        var confirmPass = document.getElementById('newPass2').value;
+                        
+                        if (!newPass || newPass.length < 6) {
+                            Swal.showValidationMessage('Password must be at least 6 characters');
+                            return false;
+                        }
+                        
+                        // Validate password strength
+                        var passwordPattern = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{6,}$/;
+                        if (!passwordPattern.test(newPass)) {
+                            Swal.showValidationMessage('Password must include uppercase, number, and special character');
+                            return false;
+                        }
+                        
+                        if (newPass !== confirmPass) {
+                            Swal.showValidationMessage('Passwords do not match');
+                            return false;
+                        }
+                        
+                        return { newPassword: newPass };
+                    }
+                }).then(function(result) {
+                    if (result.isConfirmed) {
+                        var tempPassword = $('#password').val(); // Get the temp password they just used
+                        
+                        Swal.fire({
+                            title: 'Changing Password...',
+                            allowOutsideClick: false,
+                            didOpen: function() {
+                                Swal.showLoading();
+                            }
+                        });
+                        
+                        $.post('CustomerServlet', {
+                            action: 'changePassword',
+                            old_password: tempPassword,
+                            new_password: result.value.newPassword
+                        }, function(changeResp) {
+                            if (changeResp.success) {
+                                Swal.fire({
+                                    icon: 'success',
+                                    title: 'Password Changed!',
+                                    text: 'Your password has been updated successfully. Redirecting to dashboard...',
+                                    timer: 2000,
+                                    showConfirmButton: false
+                                }).then(function() {
+                                    window.location.href = 'customerDashboard.html';
+                                });
+                            } else {
+                                Swal.fire({
+                                    icon: 'error',
+                                    title: 'Failed',
+                                    text: changeResp.message || 'Failed to change password. Please try again.'
+                                }).then(function() {
+                                    window.location.href = 'logout.html';
+                                });
+                            }
+                        }, 'json').fail(function() {
+                            Swal.fire({
+                                icon: 'error',
+                                title: 'Error',
+                                text: 'Unable to change password. Please contact support.'
+                            }).then(function() {
+                                window.location.href = 'logout.html';
+                            });
+                        });
+                    }
+                });
+                return; // Important: Stop further execution
+            }
+
+            // Check if deposit is required
+            if (res.depositRequired == true) {
+                var minAmount = res.accountType == "Savings" ? 1000 : 5000;
+
+                var amountStr = await promptModal(
+                    `Enter initial deposit (minimum ${minAmount})`, 
+                    `Min ${minAmount}`, 
+                    "number"
+                );
+                
+                if (amountStr == null) {
+                    Toast.fire({ 
+                        icon: 'warning', 
+                        title: 'Deposit cancelled. Please login again to complete.' 
+                    }); 
+                    return; 
+                }
+                
+                var amount = parseFloat(amountStr);
+                if (isNaN(amount) || amount < minAmount) { 
+                    Toast.fire({ 
+                        icon: 'error', 
+                        title: 'Amount must be at least ' + minAmount 
+                    }); 
+                    return; 
+                }
+                if (amount >= 10000) { 
+                    Toast.fire({ 
+                        icon: 'error', 
+                        title: 'Amount must be at most 10000' 
+                    }); 
+                    return; 
+                }
+                
+                var pin = await promptModal("Enter transaction PIN (4 digits)", "PIN", "password");
+                
+                if (!pin || pin.length < 4) { 
+                    Toast.fire({ icon: 'error', title: 'Invalid PIN SIZE entered' }); 
+                    return; 
+                }
+
+                $.post("DepositServlet", { 
+                    userId: res.userId, 
+                    amount: amount, 
+                    pin: pin 
+                }, function(depRes) {
+                    if (depRes.success) {
+                        Toast.fire({ 
+                            icon: 'success', 
+                            title: 'Deposit successful! Redirecting...' 
+                        });
+                        setTimeout(() => {
+                            window.location.href = "customerDashboard.html";
+                        }, 1500);
+                    } else {
+                        Toast.fire({
+                            icon: 'error', 
+                            title: depRes.message || "Deposit failed. Please check your PIN and try again."
+                        });
+                    }
+                }, "json").fail(function() {
+                    Toast.fire({ 
+                        icon: 'error', 
+                        title: 'Unable to process deposit' 
+                    });
+                });
+            } 
+            // No deposit required - redirect to dashboard
+            else if (res.redirect) {
+                Toast.fire({ 
+                    icon: 'success', 
+                    title: 'Login successful!' 
+                });
+                setTimeout(() => { 
+                    window.location.href = res.redirect; 
+                }, 800);
+            }
+
+        } catch(err) {
+            console.error("Login error:", err);
+            Toast.fire({ 
+                icon: 'error', 
+                title: 'Unable to connect to server. Try again later.' 
+            });
+        }
+    });
+}
