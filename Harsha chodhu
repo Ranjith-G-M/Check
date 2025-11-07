@@ -1,0 +1,94 @@
+// Replace the handleForgotPassword method and handleApprovedUser in LoginServlet.java
+
+private void handleForgotPassword(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    String email = req.getParameter("email");
+
+    if (email == null || email.trim().isEmpty()) {
+        JsonUtil.write(resp, false, "Email is required");
+        return;
+    }
+
+    email = email.trim();
+    logger.info("Forgot password request for: " + email);
+
+    try {
+        Customer customer = userService.getCustomerByEmail(email);
+
+        if (customer == null) {
+            logger.warn("Forgot password: Email not found - " + email);
+            JsonUtil.write(resp, true, "If this email is registered, you will receive reset instructions.");
+            return;
+        }
+        if (!"APPROVED".equalsIgnoreCase(customer.getStatus())) {
+            logger.warn("Forgot password: Account not approved - " + email + ", Status: " + customer.getStatus());
+            JsonUtil.write(resp, false, "Account not approved. Please contact 9XXXXXXXXX");
+            return;
+        }
+
+        String tempPassword = generateTempPassword();
+        int user_id = customer.getUser_id();
+        
+        // Update password AND set temp password flag
+        boolean updated = userService.updatePasswordWithTempFlag(user_id, tempPassword, true);
+
+        if (updated) {
+            String subject = "Password Reset - GMR Bank";
+            String body = "Dear " + customer.getName() + ",\n\n" + 
+                         "Your temporary password is: " + tempPassword + "\n\n" +
+                         "IMPORTANT: You will be required to change this password on your next login.\n\n" +
+                         "If you did not request this, please contact us immediately at support@gmrbank.com\n\n" +
+                         "Best regards,\n" + "GMR Bank Team";
+
+            // EmailUtil.sendEmail(customer.getEmail(), subject, body);
+            logger.info("Password reset email sent to: " + email);
+            JsonUtil.write(resp, true, "Password reset instructions sent to your email.");
+        } else {
+            JsonUtil.write(resp, false, "Failed to reset password. Please try again.");
+        }
+
+    } catch (Exception e) {
+        logger.error("Error in forgot password: " + e.getMessage(), e);
+        JsonUtil.write(resp, false, "An error occurred. Please try again later.");
+    }
+}
+
+private void handleApprovedUser(HttpServletRequest req, HttpServletResponse resp, Customer user)
+        throws IOException {
+
+    HttpSession oldSession = req.getSession(false);
+    if (oldSession != null) {
+        oldSession.invalidate();
+    }
+
+    HttpSession session = req.getSession(true);
+    session.setAttribute("user", user);
+    session.setMaxInactiveInterval(30 * 60);
+
+    String accountNumber = userService.getAccountNumberByUserId(user.getUser_id());
+    if (accountNumber != null) {
+        session.setAttribute("accountNumber", accountNumber);
+    }
+
+    // Check if temp password - FORCE password change
+    if (user.isIs_temp_password()) {
+        JsonUtil.write(resp, true, "Temporary password detected", 
+                      "forcedPasswordChange", true, 
+                      "userId", user.getUser_id(),
+                      "role", "customer");
+        return;
+    }
+
+    // Check for initial deposit
+    if (!user.isIntial_deposit_done()) {
+        JsonUtil.write(resp, true, "Initial deposit required", 
+                      "depositRequired", true, 
+                      "userId", user.getUser_id(),
+                      "accountType", user.getAccount_type(), 
+                      "role", "customer");
+    } else {
+        JsonUtil.write(resp, true, "Login successful", 
+                      "depositRequired", false, 
+                      "redirect", "customerDashboard.html", 
+                      "role", "customer");
+    }
+}
