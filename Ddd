@@ -1,0 +1,100 @@
+// Add this to login.html script section, in the login form submit handler
+// Replace the existing success handling with this:
+
+if (!res.success) {
+    let errorMessage = "Login failed";
+    if (typeof res.message == 'string') {
+        errorMessage = res.message;
+    }
+    
+    Toast.fire({ 
+        icon: 'error', 
+        title: errorMessage 
+    });
+    return;
+}
+
+// NEW: Check if forced password change is required
+if (res.forcedPasswordChange == true) {
+    Swal.fire({
+        title: 'Password Change Required',
+        html: `
+            <p class="text-sm text-gray-600 mb-4">You are using a temporary password. Please create a new password.</p>
+            <input type="password" id="newPass1" class="swal2-input" placeholder="New Password (min 6 chars)">
+            <input type="password" id="newPass2" class="swal2-input" placeholder="Confirm New Password">
+            <p class="text-xs text-gray-500 mt-2">Password must be at least 6 characters</p>
+        `,
+        showCancelButton: false,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        confirmButtonText: 'Change Password',
+        preConfirm: function() {
+            var newPass = document.getElementById('newPass1').value;
+            var confirmPass = document.getElementById('newPass2').value;
+            
+            if (!newPass || newPass.length < 6) {
+                Swal.showValidationMessage('Password must be at least 6 characters');
+                return false;
+            }
+            
+            if (newPass !== confirmPass) {
+                Swal.showValidationMessage('Passwords do not match');
+                return false;
+            }
+            
+            return { newPassword: newPass };
+        }
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            var tempPassword = $('#password').val(); // Get the temp password they just used
+            
+            Swal.fire({
+                title: 'Changing Password...',
+                allowOutsideClick: false,
+                didOpen: function() {
+                    Swal.showLoading();
+                }
+            });
+            
+            $.post('CustomerServlet', {
+                action: 'changePassword',
+                old_password: tempPassword,
+                new_password: result.value.newPassword
+            }, function(changeResp) {
+                if (changeResp.success) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Password Changed!',
+                        text: 'Your password has been updated successfully. Redirecting...',
+                        timer: 2000,
+                        showConfirmButton: false
+                    }).then(function() {
+                        window.location.href = 'customerDashboard.html';
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Failed',
+                        text: changeResp.message || 'Failed to change password. Please try again.'
+                    }).then(function() {
+                        window.location.href = 'logout.html';
+                    });
+                }
+            }, 'json').fail(function() {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: 'Unable to change password. Please contact support.'
+                }).then(function() {
+                    window.location.href = 'logout.html';
+                });
+            });
+        }
+    });
+    return;
+}
+
+// Rest of the existing deposit and redirect logic...
+if (res.depositRequired == true) {
+    // ... existing deposit code
+}
