@@ -1,0 +1,63 @@
+// Replace getTransactions method in CustomerDAOImpl.java
+public List<Transactions> getTransactions(int accountIdByUserId, String fromDate, String toDate, String txnType) {
+    StringBuilder sql = new StringBuilder(
+        "SELECT transaction_id, account_id, type, amount, transaction_date, description, balance_after_transaction " +
+        "FROM SQLTraining.GMR_Bank.dd_Transactions WHERE account_id = ?"
+    );
+
+    if (fromDate != null && !fromDate.isEmpty()) {
+        sql.append(" AND transaction_date >= ?");
+    }
+    if (toDate != null && !toDate.isEmpty()) {
+        sql.append(" AND transaction_date <= ?");
+    }
+    if (txnType != null && !txnType.isEmpty()) {
+        sql.append(" AND type = ?");
+    }
+
+    sql.append(" ORDER BY transaction_date DESC, transaction_id DESC");
+
+    List<Transactions> list = new ArrayList<Transactions>();
+    try (Connection con = DbConnection.getConnection();
+            PreparedStatement ps = con.prepareStatement(sql.toString())) {
+
+        int index = 1;
+        ps.setInt(index++, accountIdByUserId);
+
+        if (fromDate != null && !fromDate.isEmpty()) {
+            ps.setDate(index++, java.sql.Date.valueOf(fromDate));
+        }
+        if (toDate != null && !toDate.isEmpty()) {
+            ps.setDate(index++, java.sql.Date.valueOf(toDate));
+        }
+        if (txnType != null && !txnType.isEmpty()) {
+            ps.setString(index++, txnType);
+        }
+
+        try (ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                Transactions t = new Transactions();
+                t.setTransaction_id(rs.getInt("transaction_id"));
+                t.setAccount_id(rs.getInt("account_id"));
+                t.setType(rs.getString("type"));
+                t.setAmount(rs.getDouble("amount"));
+                t.setTransaction_date(rs.getDate("transaction_date"));
+                t.setDescription(rs.getString("description"));
+                
+                // Get balance - check if it's NULL (for old transactions)
+                double balance = rs.getDouble("balance_after_transaction");
+                if (!rs.wasNull()) {
+                    t.setBalance_after_transaction(balance);
+                    t.setHasBalance(true);
+                } else {
+                    t.setHasBalance(false);
+                }
+                
+                list.add(t);
+            }
+        }
+    } catch (ClassNotFoundException | SQLException e) {
+        e.printStackTrace();
+    }
+    return list;
+}
