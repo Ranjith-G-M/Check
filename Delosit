@@ -1,0 +1,130 @@
+-- =====================================================
+-- 1. Update ms_p_Deposit Procedure
+-- =====================================================
+CREATE OR ALTER PROCEDURE [dbo].[ms_p_Deposit]
+    @account_id INT,
+    @amount DECIMAL(15, 2),
+    @description VARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        DECLARE @new_balance DECIMAL(15, 2);
+        
+        -- Update balance and capture new balance in one go
+        UPDATE [SQLTraining].[GMR_Bank].[md_Accounts]
+        SET balance = balance + @amount,
+            updated_date = GETUTCDATE()
+        WHERE account_id = @account_id;
+        
+        -- Get the updated balance
+        SELECT @new_balance = balance 
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts]
+        WHERE account_id = @account_id;
+
+        -- Insert transaction with balance
+        INSERT INTO [SQLTraining].[GMR_Bank].[dd_Transactions]
+        (account_id, type, amount, description, transaction_date, balance_after_transaction)
+        VALUES (@account_id, 'CREDIT', @amount, @description, GETUTCDATE(), @new_balance);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+GO
+
+-- =====================================================
+-- 2. Update ms_p_FundTransfer Procedure
+-- =====================================================
+CREATE OR ALTER PROCEDURE [dbo].[ms_p_FundTransfer]
+    @from_account_id INT,
+    @to_account_id INT,
+    @amount DECIMAL(15, 2),
+    @pin VARCHAR(6),
+    @description VARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @user_id INT;
+    DECLARE @stored_pin VARCHAR(6);
+    DECLARE @balance DECIMAL(15, 2);
+    DECLARE @from_balance DECIMAL(15, 2);
+    DECLARE @to_balance DECIMAL(15, 2);
+
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- Get user_id and check balance
+        SELECT @user_id = user_id, @balance = balance
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts]
+        WHERE account_id = @from_account_id;
+
+        IF @balance < @amount
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Insufficient balance', 16, 1);
+            RETURN;
+        END
+
+        -- Verify PIN
+        SELECT @stored_pin = pin
+        FROM [SQLTraining].[GMR_Bank].[ms_Users]
+        WHERE user_id = @user_id;
+
+        IF @stored_pin != @pin
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Invalid PIN', 16, 1);
+            RETURN;
+        END
+
+        -- Debit from sender
+        UPDATE [SQLTraining].[GMR_Bank].[md_Accounts]
+        SET balance = balance - @amount,
+            updated_date = GETUTCDATE()
+        WHERE account_id = @from_account_id;
+        
+        -- Get sender's new balance
+        SELECT @from_balance = balance
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts]
+        WHERE account_id = @from_account_id;
+
+        -- Credit to receiver
+        UPDATE [SQLTraining].[GMR_Bank].[md_Accounts]
+        SET balance = balance + @amount,
+            updated_date = GETUTCDATE()
+        WHERE account_id = @to_account_id;
+        
+        -- Get receiver's new balance
+        SELECT @to_balance = balance
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts]
+        WHERE account_id = @to_account_id;
+
+        -- Insert debit transaction with balance
+        INSERT INTO [SQLTraining].[GMR_Bank].[dd_Transactions]
+        (account_id, type, amount, description, transaction_date, balance_after_transaction)
+        VALUES (@from_account_id, 'DEBIT', @amount, @description, GETUTCDATE(), @from_balance);
+
+        -- Insert credit transaction with balance
+        INSERT INTO [SQLTraining].[GMR_Bank].[dd_Transactions]
+        (account_id, type, amount, description, transaction_date, balance_after_transaction)
+        VALUES (@to_account_id, 'CREDIT', @amount, @description, GETUTCDATE(), @to_balance);
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(@ErrorMessage, 16, 1);
+    END CATCH;
+END;
+GO
+
+-- =====================================================
+-- 3. Test the procedures
+-- =====================================================
+PRINT 'Stored procedures updated successfully!';
+PRINT 'Balance will now be tracked for all new transactions.';
