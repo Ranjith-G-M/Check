@@ -1,0 +1,37 @@
+// Find and update these sections in CustomerDAOImpl.payLoanEMI method
+// Replace the transaction insert section with this:
+
+// After deducting balance from account:
+String updateAccountSql = "UPDATE [SQLTraining].[GMR_Bank].md_Accounts SET balance = balance - ? WHERE account_id = ?";
+PreparedStatement ps1 = conn.prepareStatement(updateAccountSql);
+ps1.setDouble(1, emiAmount);
+ps1.setInt(2, accountId);
+ps1.executeUpdate();
+ps1.close();
+
+// Get new balance after deduction
+String getBalanceSql = "SELECT balance FROM [SQLTraining].[GMR_Bank].md_Accounts WHERE account_id = ?";
+PreparedStatement ps2 = conn.prepareStatement(getBalanceSql);
+ps2.setInt(1, accountId);
+ResultSet balanceRs = ps2.executeQuery();
+double newBalance = 0;
+if (balanceRs.next()) {
+    newBalance = balanceRs.getDouble("balance");
+}
+balanceRs.close();
+ps2.close();
+
+// Insert transaction WITH balance
+String insertTransactionSql = """
+        INSERT INTO [SQLTraining].[GMR_Bank].dd_Transactions (account_id, amount, type, description, transaction_date, balance_after_transaction)
+        VALUES (?, ?, 'DEBIT', ?, GETUTCDATE(), ?)
+    """;
+PreparedStatement ps3 = conn.prepareStatement(insertTransactionSql);
+ps3.setInt(1, accountId);
+ps3.setDouble(2, emiAmount);
+ps3.setString(3, "Loan EMI Payment for Loan ID: " + loanId);
+ps3.setDouble(4, newBalance);
+ps3.executeUpdate();
+ps3.close();
+
+// Continue with loan update...
