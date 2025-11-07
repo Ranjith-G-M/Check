@@ -1,0 +1,40 @@
+// Replace the changePassword method in CustomerServlet.java
+
+private void changePassword(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    Customer user = (Customer) req.getSession().getAttribute("user");
+    
+    if (user == null) {
+        logger.warn("Password change with no session user");
+        JsonUtil.write(resp, false, "Session expired. Please login again");
+        return;
+    }
+    
+    String oldPassword = req.getParameter("old_password");
+    String newPassword = req.getParameter("new_password");
+    
+    logger.info("Changing password - User:", user.getUser_id());
+    
+    boolean success = customerService.changePassword(user.getUser_id(), oldPassword, newPassword);
+    
+    if (success) {
+        logger.info("Password changed successfully - User:", user.getUser_id());
+        
+        // IMPORTANT: Update the user object in session to clear temp password flag
+        try {
+            Customer updatedUser = customerService.getUserById(user.getUser_id());
+            if (updatedUser != null) {
+                // Preserve the session but update user object
+                req.getSession().setAttribute("user", updatedUser);
+                logger.info("Updated user object in session with is_temp_password = false");
+            }
+        } catch (Exception e) {
+            logger.error("Failed to refresh user in session", e);
+        }
+        
+        // Don't invalidate session - just send success
+        JsonUtil.write(resp, true, "Password changed successfully. Redirecting to dashboard...");
+    } else {
+        logger.warn("Password change failed - User:", user.getUser_id());
+        JsonUtil.write(resp, false, "Failed to change password. Check your current password.");
+    }
+}
