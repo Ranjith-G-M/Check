@@ -1,0 +1,82 @@
+// Add to CustomerServiceImpl.java
+public boolean updatePasswordWithTempFlag(int userId, String newPassword, boolean isTempPassword) {
+    return userDAO.updatePasswordWithTempFlag(userId, newPassword, isTempPassword);
+}
+
+// Add to CustomerDAOImpl.java
+public boolean updatePasswordWithTempFlag(int userId, String newPassword, boolean isTempPassword) {
+    Connection con = null;
+    PreparedStatement ps = null;
+    
+    try {
+        con = DbConnection.getConnection();
+        String hashedPassword = BCrypt.hashpw(newPassword, BCrypt.gensalt());
+        
+        String sql = "UPDATE [SQLTraining].[GMR_Bank].[ms_Users] " +
+                    "SET password = ?, is_temp_password = ?, updated_date = GETUTCDATE() " +
+                    "WHERE user_id = ?";
+        
+        ps = con.prepareStatement(sql);
+        ps.setString(1, hashedPassword);
+        ps.setBoolean(2, isTempPassword);
+        ps.setInt(3, userId);
+        
+        return ps.executeUpdate() > 0;
+        
+    } catch (Exception e) {
+        e.printStackTrace();
+        return false;
+    } finally {
+        try {
+            if (ps != null) ps.close();
+            if (con != null) con.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+// Update the existing changePassword method in CustomerDAOImpl to clear the flag
+public boolean changePassword(int userId, String oldPassword, String newPassword) {
+    Connection con = null;
+    PreparedStatement ps = null;
+    
+    try {
+        if (!verifyPassword(userId, oldPassword)) {
+            logger.info("Old password verification failed");
+            return false;
+        }
+        
+        String hashedPassword = BCrypt.hashpw(newPassword, BCrypt.gensalt());
+        
+        con = DbConnection.getConnection();
+        String sql = "UPDATE [SQLTraining].[GMR_Bank].[ms_Users] " +
+                    "SET password = ?, is_temp_password = 0, updated_date = GETUTCDATE() " +
+                    "WHERE user_id = ?";
+        ps = con.prepareStatement(sql);
+        ps.setString(1, hashedPassword);
+        ps.setInt(2, userId);
+
+        int rows = ps.executeUpdate();
+        return rows > 0;
+
+    } catch (Exception e) {
+        e.printStackTrace();
+    } finally {
+        if (ps != null) {
+            try {
+                ps.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+        if (con != null) {
+            try {
+                con.close();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+    return false;
+}
