@@ -1,0 +1,160 @@
+// Replace loadHistoryPage and loadTransactionHistory functions in customer.js
+
+function loadHistoryPage() {
+    var html = `
+        <h2 class="text-2xl font-bold mb-4">Transaction History</h2>
+        <div class="bg-white p-4 rounded shadow mb-4">
+            <div class="grid grid-cols-4 gap-4">
+                <div>
+                    <label class="block font-semibold mb-1">From Date</label>
+                    <input type="date" id="fromDate" class="p-2 border rounded w-full">
+                </div>
+                <div>
+                    <label class="block font-semibold mb-1">To Date</label>
+                    <input type="date" id="toDate" class="p-2 border rounded w-full">
+                </div>
+                <div>
+                    <label class="block font-semibold mb-1">Type</label>
+                    <select id="txnType" class="p-2 border rounded w-full">
+                        <option value="">All</option>
+                        <option value="CREDIT">Credit</option>
+                        <option value="DEBIT">Debit</option>
+                    </select>
+                </div>
+                <div class="flex items-end">
+                    <button id="filterBtn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full">
+                        Filter
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mb-3 flex gap-2">
+            <button id="exportExcel" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                <i class="fa fa-file-excel-o"></i> Export Excel
+            </button>
+            <button id="exportPDF" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                <i class="fa fa-file-pdf-o"></i> Export PDF
+            </button>
+        </div>
+        
+        <div class="bg-white rounded shadow">
+            <table id="historyTable" class="display w-full text-sm">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Balance After</th>
+                        <th>Date</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+            </table>
+        </div>
+    `;
+    
+    $('#content').html(html);
+    loadTransactionHistory();
+    
+    $('#content').on('click', '#filterBtn', function() {
+        loadTransactionHistory();
+    });
+    
+    $('#content').on('click', '#exportExcel', function() {
+        $('#historyTable').DataTable().button('.buttons-excel').trigger();
+    });
+    
+    $('#content').on('click', '#exportPDF', function() {
+        $('#historyTable').DataTable().button('.buttons-pdf').trigger();
+    });
+}
+
+function loadTransactionHistory() {
+    var fromDate = $('#fromDate').val();
+    var toDate = $('#toDate').val();
+    var txnType = $('#txnType').val();
+    
+    var params = 'action=getTransactions';
+    if (fromDate) params += '&fromDate=' + fromDate;
+    if (toDate) params += '&toDate=' + toDate;
+    if (txnType) params += '&txnType=' + txnType;
+    
+    if ($.fn.DataTable.isDataTable('#historyTable')) {
+        $('#historyTable').DataTable().destroy();
+    }
+    
+    $('#historyTable').DataTable({
+        ajax: {
+            url: '/' + getContextPath() + '/CustomerServlet?' + params,
+            dataSrc: function(json) {
+                return json.transactions || [];
+            }
+        },
+        columns: [
+            { data: 'transaction_id' },
+            { 
+                data: 'type',
+                render: function(data) {
+                    var color = data == 'CREDIT' ? 'text-green-600' : 'text-red-600';
+                    return '<span class="' + color + ' font-semibold">' + data + '</span>';
+                }
+            },
+            { 
+                data: 'amount',
+                render: function(data, type, row) {
+                    var prefix = row.type == 'CREDIT' ? '+' : '-';
+                    var color = row.type == 'CREDIT' ? 'text-green-600' : 'text-red-600';
+                    return '<span class="' + color + ' font-semibold">' + prefix + '₹' + parseFloat(data).toFixed(2) + '</span>';
+                }
+            },
+            { 
+                data: 'balance_after_transaction',
+                render: function(data, type, row) {
+                    // Check if balance is available
+                    if (row.hasBalance === false || data === null || data === undefined) {
+                        return '<span class="text-gray-400 text-xs italic">N/A</span>';
+                    }
+                    return '<span class="font-semibold text-blue-700">₹' + parseFloat(data).toFixed(2) + '</span>';
+                }
+            },
+            { 
+                data: 'transaction_date',
+                render: function(data) {
+                    var date = new Date(data);
+                    return date.toLocaleDateString('en-IN') + ' ' + date.toLocaleTimeString('en-IN', {hour: '2-digit', minute:'2-digit'});
+                }
+            },
+            { 
+                data: 'description',
+                render: function(data) {
+                    return data || '<span class="text-gray-400">-</span>';
+                }
+            }
+        ],
+        order: [[0, 'desc']],
+        dom: 'frtip',
+        buttons: [
+            {
+                extend: 'excelHtml5',
+                text: 'Export Excel',
+                title: 'Transaction_History',
+                className: 'buttons-excel',
+                exportOptions: {
+                    columns: [0, 1, 2, 3, 4, 5]
+                }
+            },
+            {
+                extend: 'pdfHtml5',
+                text: 'Export PDF',
+                title: 'Transaction_History',
+                orientation: 'landscape',
+                pageSize: 'A4',
+                className: 'buttons-pdf',
+                exportOptions: {
+                    columns: [0, 1, 2, 3, 4, 5]
+                }
+            }
+        ]
+    });
+}
