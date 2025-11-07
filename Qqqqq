@@ -1,0 +1,105 @@
+// Replace the password change handling part in the setupLoginForm() function in login.html
+// Find this section and replace it:
+
+if (res.forcedPasswordChange === true) {
+    console.log("Forced password change detected!");
+    
+    Swal.fire({
+        title: 'Password Change Required',
+        html: `
+            <p class="text-sm text-gray-600 mb-4">You are using a temporary password. Please create a new password to continue.</p>
+            <input type="password" id="newPass1" class="swal2-input" placeholder="New Password (min 6 chars)">
+            <input type="password" id="newPass2" class="swal2-input" placeholder="Confirm New Password">
+            <p class="text-xs text-gray-500 mt-2">Password must be at least 6 characters with uppercase, number, and special character</p>
+        `,
+        showCancelButton: false,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        confirmButtonText: 'Change Password',
+        preConfirm: function() {
+            var newPass = document.getElementById('newPass1').value;
+            var confirmPass = document.getElementById('newPass2').value;
+            
+            if (!newPass || newPass.length < 6) {
+                Swal.showValidationMessage('Password must be at least 6 characters');
+                return false;
+            }
+            
+            // Validate password strength
+            var passwordPattern = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{6,}$/;
+            if (!passwordPattern.test(newPass)) {
+                Swal.showValidationMessage('Password must include uppercase, number, and special character');
+                return false;
+            }
+            
+            if (newPass !== confirmPass) {
+                Swal.showValidationMessage('Passwords do not match');
+                return false;
+            }
+            
+            return { newPassword: newPass };
+        }
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            var tempPassword = $('#password').val(); // Get the temp password they just used
+            
+            Swal.fire({
+                title: 'Changing Password...',
+                allowOutsideClick: false,
+                didOpen: function() {
+                    Swal.showLoading();
+                }
+            });
+            
+            // IMPORTANT: Send the password change request
+            $.ajax({
+                url: 'CustomerServlet',
+                type: 'POST',
+                data: {
+                    action: 'changePassword',
+                    old_password: tempPassword,
+                    new_password: result.value.newPassword
+                },
+                dataType: 'json',
+                success: function(changeResp) {
+                    console.log("Password change response:", changeResp);
+                    
+                    if (changeResp.success) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Password Changed!',
+                            text: 'Your password has been updated successfully. Redirecting to dashboard...',
+                            timer: 2000,
+                            showConfirmButton: false
+                        }).then(function() {
+                            // IMPORTANT: Direct redirect, no logout
+                            window.location.href = 'customerDashboard.html';
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Failed',
+                            text: changeResp.message || 'Failed to change password. Please try again.',
+                            confirmButtonText: 'OK'
+                        }).then(function() {
+                            // Only logout if password change failed
+                            window.location.href = 'logout.html';
+                        });
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error("Password change error:", error);
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Unable to change password. Please contact support.',
+                        confirmButtonText: 'OK'
+                    }).then(function() {
+                        window.location.href = 'logout.html';
+                    });
+                }
+            });
+        }
+    });
+    return; // Stop further execution
+}
