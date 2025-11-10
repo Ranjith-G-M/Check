@@ -1,0 +1,165 @@
+USE SQLTraining;
+GO
+
+CREATE OR ALTER PROCEDURE [dbo].[ms_p_FundTransfer]
+    @from_account_id INT,
+    @to_account_id INT,
+    @amount DECIMAL(15, 2),
+    @pin VARCHAR(6),
+    @description VARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @user_id INT;
+    DECLARE @stored_pin VARCHAR(6);
+    DECLARE @balance DECIMAL(15, 2);
+    DECLARE @from_balance DECIMAL(15, 2);
+    DECLARE @to_balance DECIMAL(15, 2);
+    DECLARE @error_message VARCHAR(500);
+    DECLARE @recipient_info VARCHAR(255);
+    
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- Get user_id and check balance
+        SELECT @user_id = user_id, @balance = balance
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts]
+        WHERE account_id = @from_account_id;
+        
+        -- Get recipient info for logging
+        SELECT @recipient_info = CAST(@to_account_id AS VARCHAR) + ' - ' + 
+               ISNULL(u.name, 'Unknown') + ' (' + ISNULL(u.email, '') + ')'
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts] a
+        LEFT JOIN [SQLTraining].[GMR_Bank].[ms_Users] u ON a.user_id = u.user_id
+        WHERE a.account_id = @to_account_id;
+        
+        -- Check if sender account exists
+        IF @user_id IS NULL
+        BEGIN
+            SET @error_message = 'Sender account not found';
+            
+            -- Log failed transaction
+            INSERT INTO [SQLTraining].[GMR_Bank].[dd_Failed_Transactions]
+            (account_id, transaction_type, amount, recipient_info, failure_reason, user_id)
+            VALUES (@from_account_id, 'TRANSFER', @amount, @recipient_info, @error_message, NULL);
+            
+            ROLLBACK TRANSACTION;
+            RAISERROR(@error_message, 16, 1);
+            RETURN;
+        END
+        
+        -- Check balance
+        IF @balance < @amount
+        BEGIN
+            SET @error_message = 'Insufficient balance. Available: ' + CAST(@balance AS VARCHAR) + 
+                                ', Required: ' + CAST(@amount AS VARCHAR);
+            
+            -- Log failed transaction
+            INSERT INTO [SQLTraining].[GMR_Bank].[dd_Failed_Transactions]
+            (account_id, transaction_type, amount, recipient_info, failure_reason, user_id)
+            VALUES (@from_account_id, 'TRANSFER', @amount, @recipient_info, @error_message, @user_id);
+            
+            ROLLBACK TRANSACTION;
+            RAISERROR(@error_message, 16, 1);
+            RETURN;
+        END
+        
+        -- Verify PIN
+        SELECT @stored_pin = pin
+        FROM [SQLTraining].[GMR_Bank].[ms_Users]
+        WHERE user_id = @user_id;
+        
+        IF @stored_pin != @pin
+        BEGIN
+            SET @error_message = 'Invalid PIN entered';
+            
+            -- Log failed transaction
+            INSERT INTO [SQLTraining].[GMR_Bank].[dd_Failed_Transactions]
+            (account_id, transaction_type, amount, recipient_info, failure_reason, user_id)
+            VALUES (@from_account_id, 'TRANSFER', @amount, @recipient_info, @error_message, @user_id);
+            
+            ROLLBACK TRANSACTION;
+            RAISERROR(@error_message, 16, 1);
+            RETURN;
+        END
+        
+        -- Check if recipient exists
+        IF NOT EXISTS (SELECT 1 FROM [SQLTraining].[GMR_Bank].[md_Accounts] WHERE account_id = @to_account_id)
+        BEGIN
+            SET @error_message = 'Recipient account not found';
+            
+            -- Log failed transaction
+            INSERT INTO [SQLTraining].[GMR_Bank].[dd_Failed_Transactions]
+            (account_id, transaction_type, amount, recipient_info, failure_reason, user_id)
+            VALUES (@from_account_id, 'TRANSFER', @amount, @recipient_info, @error_message, @user_id);
+            
+            ROLLBACK TRANSACTION;
+            RAISERROR(@error_message, 16, 1);
+            RETURN;
+        END
+        
+        -- Check if trying to transfer to self
+        IF @from_account_id = @to_account_id
+        BEGIN
+            SET @error_message = 'Cannot transfer to the same account';
+            
+            -- Log failed transaction
+            INSERT INTO [SQLTraining].[GMR_Bank].[dd_Failed_Transactions]
+            (account_id, transaction_type, amount, recipient_info, failure_reason, user_id)
+            VALUES (@from_account_id, 'TRANSFER', @amount, @recipient_info, @error_message, @user_id);
+            
+            ROLLBACK TRANSACTION;
+            RAISERROR(@error_message, 16, 1);
+            RETURN;
+        END
+        
+        -- All checks passed, proceed with transfer
+        
+        -- Debit from sender
+        UPDATE [SQLTraining].[GMR_Bank].[md_Accounts]
+        SET balance = balance - @amount,
+            updated_date = GETUTCDATE()
+        WHERE account_id = @from_account_id;
+        
+        -- Get sender's new balance
+        SELECT @from_balance = balance
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts]
+        WHERE account_id = @from_account_id;
+        
+        -- Credit to receiver
+        UPDATE [SQLTraining].[GMR_Bank].[md_Accounts]
+        SET balance = balance + @amount,
+            updated_date = GETUTCDATE()
+        WHERE account_id = @to_account_id;
+        
+        -- Get receiver's new balance
+        SELECT @to_balance = balance
+        FROM [SQLTraining].[GMR_Bank].[md_Accounts]
+        WHERE account_id = @to_account_id;
+        
+        -- Insert debit transaction with balance
+        INSERT INTO [SQLTraining].[GMR_Bank].[dd_Transactions]
+        (account_id, type, amount, description, transaction_date, balance_after_transaction)
+        VALUES (@from_account_id, 'DEBIT', @amount, @description, GETUTCDATE(), @from_balance);
+        
+        -- Insert credit transaction with balance
+        INSERT INTO [SQLTraining].[GMR_Bank].[dd_Transactions]
+        (account_id, type, amount, description, transaction_date, balance_after_transaction)
+        VALUES (@to_account_id, 'CREDIT', @amount, @description, GETUTCDATE(), @to_balance);
+        
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        
+        -- Log unexpected error
+        SET @error_message = ERROR_MESSAGE();
+        
+        INSERT INTO [SQLTraining].[GMR_Bank].[dd_Failed_Transactions]
+        (account_id, transaction_type, amount, recipient_info, failure_reason, user_id)
+        VALUES (@from_account_id, 'TRANSFER', @amount, @recipient_info, 
+                'System Error: ' + @error_message, @user_id);
+        
+        RAISERROR(@error_message, 16, 1);
+    END CATCH;
+END;
+GO
